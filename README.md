@@ -1,4 +1,4 @@
-# Text Summarization Web App
+# Multiple-Documents-Summarization App
 
 This is a Flask-based web application that scrapes text from multiple web articles and generates summaries using Natural Language Processing techniques.
 
