@@ -1,6 +1,5 @@
 import numpy as np
-from flask import Flask, request, jsonify, render_template
-from googlesearch import search
+from flask import Flask, request, render_template
 from bs4 import BeautifulSoup
 import requests
 import nltk
@@ -16,127 +15,93 @@ from sklearn.feature_extraction.text import CountVectorizer
 import logging
 from transformers import pipeline
 import warnings
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
-
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return render_template('index.html')
-    
-@app.route('/summarize', methods=['POST','GET'])
+
+@app.route('/summarize', methods=['POST'])
 def summarize():
-    if request.method == 'POST':
-        # Get user input for the query and the number of search results
-        query = request.form.get('query')
-        num_results = request.form.get('doccount')
-        x=request.form.get('wordcount')
-          # Use the search function to retrieve the URLs of the search results
-        # search_results = search(query, num_results=num_results)
 
-        # # Loop through the search results and print the URLs
-        # for url in search_results:
-        #     print(url)
-        link=['https://www.cnet.com/tech/mobile/best-iphone/','https://www.techradar.com/news/best-iphone','https://www.tomsguide.com/us/best-apple-iphone,review-6348.html']
-            # link.append(url)
-        # Define the URLs to scrape
-        urls = link
-        # Create an empty list to store the text content of the <p> tags for each URL
-        p_contents = []
-        # Loop through each URL and extract the text content of the <p> tags
-        for url in urls:
-            response = requests.get(url)
-            soup = BeautifulSoup(response.content, 'html.parser')
-            paragraphs = soup.find_all('p')
-            p_contents.append([p.get_text() for p in paragraphs])
-        # Print the text content of the <p> tags for each URL
-        for i, url in enumerate(urls):
-            print(f"Contents of <p> tags for URL {i + 1} ({url}):")
-            for p_content in p_contents[i]:
-                print(p_content)
-                print()
-        # Initialize stop words
-        stop_words = set(stopwords.words('english'))
+    # Get user input
+    query = request.form.get('query')
+    num_results = request.form.get('doccount')
+    word_count = request.form.get('wordcount')
 
-        def preprocess(text):
-            # Join list of strings into a single string
-            cleaned_text = " ".join(text)
-            # Remove unwanted characters
-            cleaned_text = cleaned_text.replace('\n', ' ').replace('\r', '')
-            # Tokenize the text
-            tokens = word_tokenize(cleaned_text)
-            # Remove stop words
-            preprocessed_tokens = [token.lower() for token in tokens if token.lower() not in stop_words]
-            # Join tokens back into a string
-            preprocessed_text = " ".join(preprocessed_tokens)
-            return preprocessed_text
+    # Hardcoded URLs (for now)
+    urls = [
+        'https://www.cnet.com/tech/mobile/best-iphone/',
+        'https://www.techradar.com/news/best-iphone',
+        'https://www.tomsguide.com/us/best-apple-iphone,review-6348.html'
+    ]
 
-        # Preprocess each paragraph in p_contents
-        preprocessed_p_contents = [preprocess(p) for p in p_contents]
-        # Join all strings in the list into a single paragraph
-        summary = ' '.join(preprocessed_p_contents)
+    # Scrape paragraph text
+    p_contents = []
+    for url in urls:
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        paragraphs = soup.find_all('p')
+        p_contents.append([p.get_text() for p in paragraphs])
 
-        # Generate a word cloud object
-        wordcloud = WordCloud(width=800, height=800, background_color='white').generate(summary)
+    # Load stopwords
+    stop_words = set(stopwords.words('english'))
 
-        # Plot the word cloud
-        plt.figure(figsize=(8, 8), facecolor=None)
-        plt.imshow(wordcloud)
-        plt.axis('off')
-        plt.tight_layout(pad=0)
-        plt.show()
-        text = preprocessed_p_contents
-        parser = PlaintextParser.from_string(text, Tokenizer("english"))
-        summarizer = LsaSummarizer()
-        summary = summarizer(parser.document, 7)  # 3 is the number of sentences in the summary
-        summary_list = [str(sentence)[10:-2] for sentence in summary]
-        # Join all strings in the list into a single paragraph
-        paragraph = ' '.join(summary_list)
+    # Text preprocessing function
+    def preprocess(text):
+        cleaned_text = " ".join(text)
+        cleaned_text = cleaned_text.replace('\n', ' ').replace('\r', '')
+        tokens = word_tokenize(cleaned_text)
+        tokens = [t.lower() for t in tokens if t.lower() not in stop_words]
+        return " ".join(tokens)
 
-        # Print the resulting paragraph
-        print(paragraph)
-        # define a list of sentences
-        sentences = summary_list
+    # Preprocess scraped data
+    preprocessed_texts = [preprocess(p) for p in p_contents]
+    combined_text = " ".join(preprocessed_texts)
 
-        # create a CountVectorizer object
-        vectorizer = CountVectorizer(stop_words='english')
+    # Word Cloud (local display)
+    wordcloud = WordCloud(width=800, height=800, background_color='white').generate(combined_text)
+    plt.figure(figsize=(8, 8))
+    plt.imshow(wordcloud)
+    plt.axis('off')
+    plt.show()
 
-        # fit the vectorizer on the sentences
-        vectorizer.fit(sentences)
+    # LSA Summarization
+    parser = PlaintextParser.from_string(combined_text, Tokenizer("english"))
+    lsa_summarizer = LsaSummarizer()
+    lsa_summary = lsa_summarizer(parser.document, 7)
+    lsa_sentences = [str(sentence) for sentence in lsa_summary]
+    paragraph = " ".join(lsa_sentences)
 
-        # transform the sentences into a matrix of word counts
-        matrix = vectorizer.transform(sentences)
+    # Heatmap visualization
+    vectorizer = CountVectorizer(stop_words='english')
+    matrix = vectorizer.fit_transform(lsa_sentences)
 
-        # create a heatmap of the matrix
-        sns.heatmap(matrix.toarray(), annot=True, xticklabels=vectorizer.get_feature_names(),
-                    yticklabels=sentences,cmap='Blues')
+    sns.heatmap(
+        matrix.toarray(),
+        annot=True,
+        xticklabels=vectorizer.get_feature_names_out(),
+        yticklabels=lsa_sentences,
+        cmap='Blues'
+    )
+    plt.figure(figsize=(12, 8))
+    sns.set(font_scale=1.2)
+    plt.show()
 
-        # show the plot
-        plt.figure(figsize=(12, 8))
-        sns.set(font_scale=1.2)
-        plt.show()
+    # Transformer-based summarization (T5)
+    logging.getLogger("transformers").setLevel(logging.WARNING)
+    summarizer = pipeline("summarization", model="t5-small")
+    final_summary = summarizer(paragraph, do_sample=False)[0]['summary_text']
+
+    # Render SAME page with result
+    return render_template('index.html', result=final_summary)
 
 
-        # Set logging level to WARNING to suppress all warnings
-        logging.getLogger("transformers").setLevel(logging.WARNING)
-
-        # Define summarizer pipeline
-        # hub_model_id = "huggingface-course/mt5-small-finetuned-amazon-en-es"
-        # summarizer = pipeline("summarization", model=hub_model_id)
-        summarizer = pipeline("summarization", model="t5-small")
-
-        # Define article to summarize
-        ARTICLE = paragraph
-        # Call summarizer pipeline on article min_length=x
-        summary = summarizer(ARTICLE,do_sample=False)
-
-        # Print the summary
-        # print(summary)
-        # # Return the summary as a response to the POST request
-        # return jsonify(summary=summary)
-
-    return render_template('index2.html', result=ARTICLE)
 if __name__ == "__main__":
     app.run(debug=True)
+
+   
